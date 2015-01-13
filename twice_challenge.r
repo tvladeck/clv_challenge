@@ -36,6 +36,8 @@ first.sale <- ddply(data[!duplicated(data$userID) & data$actionType == "Sale", ]
 lifetimeData <- merge(purchases, sales, by = "userID", all = TRUE)
 lifetimeData <- merge(lifetimeData, first.purchase, by = "userID", all = TRUE)
 lifetimeData <- merge(lifetimeData, first.sale, by = "userID", all = TRUE)
+lifetimeData$both.actions <- !is.na(lifetimeData$purchases) & !is.na(lifetimeData$sales)
+lifetimeData$is.repeat.purchaser <- lifetimeData$num.purchases > 1 & !is.na(lifetimeData$purchases)
 
 avg.x.number <- ggplot(lifetimeData, aes(num.purchases, avg.purchase)) + geom_point()
 
@@ -51,6 +53,15 @@ fpmodel <- lm(purchases ~ first.purchase, data = lifetimeData)
 ltDataExOutliers <- lifetimeData[c(-110, -890, -1051, -67, -1352), ]
 fpmodel.logged <- lm(log1p(purchases) ~ log1p(first.purchase), data = ltDataExOutliers)
 summary(fpmodel.logged)
+
+both.actions.plot <- ggplot(lifetimeData, aes(both.actions, purchases)) + geom_point() + scale_y_log10()
+num.purchases.plot <- ggplot(lifetimeData, aes(date.first.purchase, num.purchases)) + geom_point()
+repeat.purchaser.plot <- ggplot(lifetimeData, aes(purchases, is.repeat.purchaser)) + geom_point() + scale_x_log10()
+
+num.purchases.model <- lm(num.purchases ~ date.first.purchase, data=lifetimeData)
+
+kitchen.sink <- lm(log1p(purchases) ~ date.first.purchase + both.actions + log1p(first.purchase) + is.repeat.purchaser, data = lifetimeData)
+
 
 # separate customers into repeat purchasers and sellers
 # 
