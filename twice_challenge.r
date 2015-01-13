@@ -17,15 +17,25 @@ purchases <- ddply(data[which(data$actionType == "Purchase"), ], "userID", summa
   num.purchases = sum(centAmount) /  mean(centAmount)
 )
 
-sales <- ddply(data[which(data$actionType == "Sale"), ], "userID", summarise, sales=sum(centAmount))
+sales <- ddply(data[which(data$actionType == "Sale"), ], "userID", summarise, 
+  sales = sum(centAmount),
+  avg.sale = mean(centAmount),
+  num.sales = sum(centAmount) / mean(centAmount)
+)
 
 first.purchase <- ddply(data[!duplicated(data$userID) & data$actionType == "Purchase", ], "userID", summarise, 
   first.purchase=centAmount,
   date.first.purchase = as.date(as.character(date), order="ymd")
 )
 
-lifetimeData <- merge(purchases, sales, by = "userID")
-lifetimeData <- merge(lifetimeData, first.purchase, by = "userID")
+first.sale <- ddply(data[!duplicated(data$userID) & data$actionType == "Sale", ], "userID", summarise, 
+  first.sale=centAmount,
+  date.first.sale = as.date(as.character(date), order="ymd")
+)
+
+lifetimeData <- merge(purchases, sales, by = "userID", all = TRUE)
+lifetimeData <- merge(lifetimeData, first.purchase, by = "userID", all = TRUE)
+lifetimeData <- merge(lifetimeData, first.sale, by = "userID", all = TRUE)
 
 avg.x.number <- ggplot(lifetimeData, aes(num.purchases, avg.purchase)) + geom_point()
 
