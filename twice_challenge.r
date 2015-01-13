@@ -1,22 +1,17 @@
-setwd("~/Git/Twice")
-install.packages("plyr")
-install.packages("ggplot2")
-install.packages("reshape")
+# setwd("~/Git/Twice")
+# install.packages("plyr")
+# install.packages("ggplot2")
+# install.packages("reshape")
 data <- data.frame(read.table("twice_transactions.txt"))
 colnames(data) <- c("userID", "actionType", "date", "centAmount")
 
-uniqueIDs <- unique(data["userID"])
+purchases <- ddply(data[which(data$actionType == "Purchase"), ], "userID", summarise, purchases=sum(centAmount))
+sales <- ddply(data[which(data$actionType == "Sale"), ], "userID", summarise, sales=sum(centAmount))
 
-lifetimeSales <- data.frame(userId=uniqueIDs, purchases="", sales="")
+lifetimeData <- merge(purchases, sales, by = "userID")
 
-for (i in uniqueIDs[,1]) {
-  
-  df <- data[which(data$userID == i), ]
-  purchases <- sum(df[which(df$actionType=="Purchase"),]$centAmount)
-  sales <- sum(df[which(df$actionType=="Sale"),]$centAmount)
-  
-  lifetimeSales <- rbind(lifetimeSales, c(i, purchases, sales))
-  
-}
+
+
+
 
 # remember the date range!
