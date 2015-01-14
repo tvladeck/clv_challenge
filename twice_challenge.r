@@ -1,52 +1,67 @@
 # setwd("~/Git/Twice")
+
+# install these packages if they are not already
 # install.packages("plyr")
 # install.packages("ggplot2")
-# install.packages("reshape")
 # install.packages("date")
+
+# loads the required packages 
 library("plyr")
 library("ggplot2")
-library("reshape")
 library("date")
 
+# imports the raw data
+# the raw file is not tracked in the git repo
 data <- data.frame(read.table("twice_transactions.txt"))
 colnames(data) <- c("userID", "actionType", "date", "centAmount")
 
 # normalizing dates to integers for help later on
+# and set the start date to zero for help with regression below
 data$date <- as.integer(as.date(as.character(data$date), order = "ymd"))
 data$date <- data$date - min(data$date)
 
+# converting the data to a table with each row as a summary of
+# a particular user's total purchasing behavior
 purchases <- ddply(data[which(data$actionType == "Purchase"), ], "userID", summarise,
   purchases = sum(centAmount),
   avg.purchase = mean(centAmount),
   num.purchases = sum(centAmount) /  mean(centAmount)
 )
 
+# similar for sales
 sales <- ddply(data[which(data$actionType == "Sale"), ], "userID", summarise, 
   sales = sum(centAmount),
   avg.sale = mean(centAmount),
   num.sales = sum(centAmount) / mean(centAmount)
 )
 
+# finding the date and amount of the first purchase for each user
 purchases.data <- data[data$actionType == "Purchase", ]
 first.purchase  <- ddply(purchases.data[!duplicated(purchases.data$userID), ], "userID", summarise, 
   first.purchase=centAmount,
   date.first.purchase = date
 )
 
+# finding the date and amount of the first sale for each user
 sales.data <- data[data$actionType == "Sale", ]
 first.sale <- ddply(sales.data[!duplicated(sales.data$userID), ], "userID", summarise, 
   first.sale=centAmount,
   date.first.sale = date
 )
 
+# these lines are simply merging the tables produced above in an
+# outer join on userID
 lifetimeData <- merge(purchases, sales, by = "userID", all = TRUE)
 lifetimeData <- merge(lifetimeData, first.purchase, by = "userID", all = TRUE)
 lifetimeData <- merge(lifetimeData, first.sale, by = "userID", all = TRUE)
+
+# adding columns for helpful booleans for each user
 lifetimeData$both.actions <- !is.na(lifetimeData$purchases) & !is.na(lifetimeData$sales)
 lifetimeData$is.repeat.purchaser <- lifetimeData$num.purchases > 1 & !is.na(lifetimeData$purchases)
 lifetimeData$is.repeat.seller <- lifetimeData$num.sales > 1 & !is.na(lifetimeData$sales)
 
 
+# splitting the dataset in two for use in regressions below
 purchases.data <- lifetimeData[!is.na(lifetimeData$purchases) & !is.na(lifetimeData$first.purchase) & 
                                  lifetimeData$first.purchase > 0, ]
 
@@ -57,31 +72,61 @@ sales.data <- lifetimeData[!is.na(lifetimeData$sales) & !is.na(lifetimeData$firs
 ### MODELS
 
 ## purchases
-
+# this is a multiple regression to estimate the payout over a 175 day period to a given purchaser
 full.purchases.model <- lm(log1p(purchases) ~ log1p(date.first.purchase) + log1p(first.purchase) + 
   both.actions + is.repeat.purchaser + log1p(date.first.purchase)*is.repeat.purchaser, 
   data = purchases.data
 )
 
+# helpful statistics to estimate the proceeds to a representative user
+percent.repeat <- sum(purchases.data$is.repeat.purchaser)/length(purchases.data$is.repeat.purchaser)
+percent.both <- sum(purchases.data$both.actions)/length(purchases.data$both.actions)
+avg.first.purchase <- mean(purchases.data$first.purchase)
+
+# extracting the coefficients from the linear model above
+full.intercept <- coefficients(full.purchases.model)[1]
+full.first.purchase <- coefficients(full.purchases.model)[3]
+full.both.actions <- coefficients(full.purchases.model)[4]
+full.is.repeat <- coefficients(full.purchases.model)[5]
+
+# putting it all together to get an estimate for 175-day proceeds
+log.estimate <- full.intercept + full.first.purchase * log1p(avg.first.purchase) +
+  percent.repeat * full.is.repeat + percent.both * full.both.actions
+estimate <- exp(log.estimate)
+
+# extrapolating behavior forward to get an estimate of lifetime value
+churn.rate.175 <- percent.repeat
+two.year.ltv <- sum(estimate * churn.rate.175^(c(0,1,2,3)))
+
+# doing the same but for a user who we know has both bought and sold
+both.estimate <- exp(log.estimate + (1-percent.both) * full.both.actions)
+two.year.both.ltv <- sum(both.estimate * churn.rate.175^(c(0,1,2,3)))
+
+
 ## sales
 
 # because so few sellers are not also buyers, the "both.actions" dummy is not linearly independent
+# so it is not included in the model below
+
+# the code below follows exactly the same pattern for as the purchases model above
 full.sales.model <- lm(log1p(sales) ~ log1p(date.first.sale) + log1p(first.sale) + 
-  is.repeat.seller + is.repeat.purchaser*log1p(date.first.sale), 
+  is.repeat.seller + is.repeat.seller*log1p(date.first.sale), 
   data = sales.data
 )
 
-### PLOTS
-avg.x.number <- ggplot(lifetimeData, aes(num.purchases, avg.purchase)) + geom_point()
+percent.repeat.seller <- sum(purchases.data$is.repeat.purchaser)/length(purchases.data$is.repeat.purchaser)
+avg.first.sale <- mean(purchases.data$first.sale[!is.na(purchases.data$first.sale)])
 
-purchases.x.first.purchase <- ggplot(lifetimeData, aes(first.purchase, purchases)) + geom_point()
+sm.intercept <- coefficients(full.sales.model)[1]
+sm.first.sale <- coefficients(full.sales.model)[3]
+sm.repeat <-  coefficients(full.sales.model)[4]
 
-purchases.x.first.purchase.log <- purchases.x.first.purchase + scale_y_log10() + scale_x_log10()
+log.sm.estimate <- sm.intercept + sm.first.sale * log1p(avg.first.sale) + 
+  sm.repeat * percent.repeat.seller
 
-both.actions.plot <- ggplot(lifetimeData, aes(both.actions, purchases)) + geom_point() + scale_y_log10()
-num.purchases.plot <- ggplot(lifetimeData, aes(date.first.purchase, num.purchases)) + geom_point()
-repeat.purchaser.plot <- ggplot(lifetimeData, aes(purchases, is.repeat.purchaser)) + geom_point() + scale_x_log10()
+sm.estimate <- exp(log.sm.estimate)
+sm.churn.rate.175 <- percent.repeat.seller
+two.year.ltp <- sum(sm.estimate * sm.churn.rate.175^(c(0,1,2,3)))
 
-purchases.x.sales <- ggplot(lifetimeData, aes(sales, purchases)) + geom_point()
-purchases.x.sales.log <- purchases.x.sales + scale_y_log10() + scale_x_log10()
+
 
