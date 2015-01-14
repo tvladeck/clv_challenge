@@ -11,6 +11,10 @@ library("date")
 data <- data.frame(read.table("twice_transactions.txt"))
 colnames(data) <- c("userID", "actionType", "date", "centAmount")
 
+# normalizing dates to integers for help later on
+data$date <- as.integer(as.date(as.character(data$date), order = "ymd"))
+data$date <- data$date - min(data$date)
+
 purchases <- ddply(data[which(data$actionType == "Purchase"), ], "userID", summarise,
   purchases = sum(centAmount),
   avg.purchase = mean(centAmount),
@@ -23,14 +27,16 @@ sales <- ddply(data[which(data$actionType == "Sale"), ], "userID", summarise,
   num.sales = sum(centAmount) / mean(centAmount)
 )
 
-first.purchase <- ddply(data[!duplicated(data$userID) & data$actionType == "Purchase", ], "userID", summarise, 
+purchases.data <- data[data$actionType == "Purchase", ]
+first.purchase  <- ddply(purchases.data[!duplicated(purchases.data$userID), ], "userID", summarise, 
   first.purchase=centAmount,
-  date.first.purchase = as.date(as.character(date), order="ymd")
+  date.first.purchase = date
 )
 
-first.sale <- ddply(data[!duplicated(data$userID) & data$actionType == "Sale", ], "userID", summarise, 
+sales.data <- data[data$actionType == "Sale", ]
+first.sale <- ddply(sales.data[!duplicated(sales.data$userID), ], "userID", summarise, 
   first.sale=centAmount,
-  date.first.sale = as.date(as.character(date), order="ymd")
+  date.first.sale = date
 )
 
 lifetimeData <- merge(purchases, sales, by = "userID", all = TRUE)
@@ -38,22 +44,32 @@ lifetimeData <- merge(lifetimeData, first.purchase, by = "userID", all = TRUE)
 lifetimeData <- merge(lifetimeData, first.sale, by = "userID", all = TRUE)
 lifetimeData$both.actions <- !is.na(lifetimeData$purchases) & !is.na(lifetimeData$sales)
 lifetimeData$is.repeat.purchaser <- lifetimeData$num.purchases > 1 & !is.na(lifetimeData$purchases)
+lifetimeData$is.repeat.seller <- lifetimeData$num.sales > 1 & !is.na(lifetimeData$sales)
+
+
+purchases.data <- lifetimeData[!is.na(lifetimeData$purchases) & !is.na(lifetimeData$first.purchase) & 
+                                 lifetimeData$first.purchase > 0, ]
+
+sales.data <- lifetimeData[!is.na(lifetimeData$sales) & !is.na(lifetimeData$first.sale) & 
+                             lifetimeData$first.sale > 0, ]
 
 
 ### MODELS
 
-fpmodel <- lm(purchases ~ first.purchase, data = lifetimeData)
+## purchases
 
-ltDataExOutliers <- lifetimeData[c(-110, -890, -1051, -67, -1352), ]
-fpmodel.logged <- lm(log1p(purchases) ~ log1p(first.purchase), data = ltDataExOutliers)
+full.purchases.model <- lm(log1p(purchases) ~ log1p(date.first.purchase) + log1p(first.purchase) + 
+  both.actions + is.repeat.purchaser + log1p(date.first.purchase)*is.repeat.purchaser, 
+  data = purchases.data
+)
 
-salesmodel <- lm(log1p(purchases) ~ log1p(sales), data = lifetimeData)
+## sales
 
-num.purchases.model <- lm(num.purchases ~ date.first.purchase, data=lifetimeData)
-
-kitchen.sink <- lm(log1p(purchases) ~ date.first.purchase + both.actions + log1p(first.purchase) + is.repeat.purchaser, data = lifetimeData)
-
-
+# because so few sellers are not also buyers, the "both.actions" dummy is not linearly independent
+full.sales.model <- lm(log1p(sales) ~ log1p(date.first.sale) + log1p(first.sale) + 
+  is.repeat.seller + is.repeat.purchaser*log1p(date.first.sale), 
+  data = sales.data
+)
 
 ### PLOTS
 avg.x.number <- ggplot(lifetimeData, aes(num.purchases, avg.purchase)) + geom_point()
