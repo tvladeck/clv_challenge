@@ -73,8 +73,8 @@ sales.data <- lifetimeData[!is.na(lifetimeData$sales) & !is.na(lifetimeData$firs
 
 ## purchases
 # this is a multiple regression to estimate the payout over a 175 day period to a given purchaser
-full.purchases.model <- lm(log1p(purchases) ~ log1p(date.first.purchase) + log1p(first.purchase) + 
-  both.actions + is.repeat.purchaser + log1p(date.first.purchase)*is.repeat.purchaser, 
+full.purchases.model <- lm(log1p(purchases) ~ date.first.purchase + log1p(first.purchase) + 
+  both.actions + is.repeat.purchaser + date.first.purchase*is.repeat.purchaser, 
   data = purchases.data
 )
 
@@ -90,18 +90,20 @@ full.both.actions <- coefficients(full.purchases.model)[4]
 full.is.repeat <- coefficients(full.purchases.model)[5]
 
 # putting it all together to get an estimate for 175-day proceeds
+# note we omit the date term to represent a user purchasing today
 log.estimate <- full.intercept + full.first.purchase * log1p(avg.first.purchase) +
   percent.repeat * full.is.repeat + percent.both * full.both.actions
 estimate <- exp(log.estimate)
 
+# we then have to adjust up the value by the unobserved transactions
+estimate <- estimate * (1 + 0.5^(175/half.life))
+
 # extrapolating behavior forward to get an estimate of lifetime value
-churn.rate.175 <- percent.repeat
-two.year.ltv <- sum(estimate * churn.rate.175^(c(0,1,2,3)))
-
-# doing the same but for a user who we know has both bought and sold
-both.estimate <- exp(log.estimate + (1-percent.both) * full.both.actions)
-two.year.both.ltv <- sum(both.estimate * churn.rate.175^(c(0,1,2,3)))
-
+# we use the cohort of the first 10 days to estimate the 175-day churn rate
+cohort.10d <- purchases.data[purchases.data$date.first.purchase<10,  ]
+churn.rate.175 <- sum(purchases.data$num.purchases>1) / sum(purchases.data$num.purchases>0)
+multiplier <- sum(churn.rate.175^c(0,1,2,3))
+two.year.ltv <- multiplier * estimate
 
 ## sales
 
@@ -109,24 +111,31 @@ two.year.both.ltv <- sum(both.estimate * churn.rate.175^(c(0,1,2,3)))
 # so it is not included in the model below
 
 # the code below follows exactly the same pattern for as the purchases model above
-full.sales.model <- lm(log1p(sales) ~ log1p(date.first.sale) + log1p(first.sale) + 
-  is.repeat.seller + is.repeat.seller*log1p(date.first.sale), 
+
+# regression model
+full.sales.model <- lm(log1p(sales) ~ date.first.sale + log1p(first.sale) + 
+  is.repeat.seller + is.repeat.seller*date.first.sale, 
   data = sales.data
 )
 
+# statistics for an average seller
 percent.repeat.seller <- sum(purchases.data$is.repeat.purchaser)/length(purchases.data$is.repeat.purchaser)
 avg.first.sale <- mean(purchases.data$first.sale[!is.na(purchases.data$first.sale)])
 
+# extracting model coefficients
 sm.intercept <- coefficients(full.sales.model)[1]
 sm.first.sale <- coefficients(full.sales.model)[3]
 sm.repeat <-  coefficients(full.sales.model)[4]
 
+# estimate for a 175 day period
 log.sm.estimate <- sm.intercept + sm.first.sale * log1p(avg.first.sale) + 
   sm.repeat * percent.repeat.seller
-
 sm.estimate <- exp(log.sm.estimate)
+
+# extrapolating forward to a two year period
 sm.churn.rate.175 <- percent.repeat.seller
-two.year.ltp <- sum(sm.estimate * sm.churn.rate.175^(c(0,1,2,3)))
+sm.multiplier <- sum(sm.churn.rate.175 ^ c(0,1,2,3))
+two.year.ltp <- sm.estimate * sm.multiplier
 
 
 
