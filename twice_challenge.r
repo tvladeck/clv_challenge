@@ -95,13 +95,12 @@ log.estimate <- full.intercept + full.first.purchase * log1p(avg.first.purchase)
   percent.repeat * full.is.repeat + percent.both * full.both.actions
 estimate <- exp(log.estimate)
 
-# we then have to adjust up the value by the unobserved transactions
-estimate <- estimate * (1 + 0.5^(175/half.life))
-
 # extrapolating behavior forward to get an estimate of lifetime value
 # we use the cohort of the first 10 days to estimate the 175-day churn rate
 cohort.10d <- purchases.data[purchases.data$date.first.purchase<10,  ]
-churn.rate.175 <- sum(purchases.data$num.purchases>1) / sum(purchases.data$num.purchases>0)
+
+# we then have to adjust up the value by the unobserved transactions
+churn.rate.175 <- (sum(purchases.data$num.purchases>1)*(1 + 0.5^(175/half.life))) / sum(purchases.data$num.purchases>0)
 multiplier <- sum(churn.rate.175^c(0,1,2,3))
 two.year.ltv <- multiplier * estimate
 
